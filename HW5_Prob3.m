@@ -46,18 +46,20 @@ t   = 1.0 * millimeters;
 er1 = 9.5;
 er2 = 1.0;
 
+ero = 3.05;
+ere = 4.7917;
+
 % HIGH RESOLUTION GRID
 Nx = 1024;
 Ny = 1024;
 
 % PWEM PARAMETERS
-PQ.P    = 51;
-PQ.Q    = 51;
-MODE.EM = ['E' 'H'];
+PQ.P    = 11;
+PQ.Q    = 11;
+MODE.EM = 'H';
 
-% ATTENUATION FACTOR
-Betamax = (pi/a)*[1;0];
-bMin = 0.0001;
+% NUMBER OF POINTS IN BAND DIAGRAM
+NP = 50;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% BUILD UNIT CELL ONTO HIGH RESOLUTION REAL-SPACE GRID
@@ -77,9 +79,10 @@ dy = t/ny;
 xa = [0:Nx-1]*dx; xa = xa - mean(xa);
 ya = [0:Ny-1]*dy; ya = ya - mean(ya);
 
-% BUILD UNIT CELL
+% BUILD INHOMOGENEOUS UNIT CELL
 DEV.UR  = ones(Nx,Ny);
 DEV.ER  = er2 * ones(Nx,Ny);
+
 
 % CALCULATE START AND STOP INDICES
 nx  = Nx/2;
@@ -97,45 +100,78 @@ DEV.ER(nx1:nx2,ny1:ny2) = er1;
 DEV.ER(1:nx1,ny3:ny4)   = er1;
 DEV.ER(nx2:Nx,ny3:ny4)  = er1;
 DEV.ER(nx3:nx4,1:ny1)   = er1;
-DEV.ER(nx3:nx4,ny2:Ny)   = er1;
+DEV.ER(nx3:nx4,ny2:Ny)  = er1;
 
-% % VISUALIZE SUPER CELL
-c = imagesc(xa,ya,DEV.ER');
-axis equal tight;
-title('$\textrm{Unit Cell}$','Interpreter','LaTex','FontSize',15);
-colormap(gray);
-colorbar;
-c = get(c,'Parent');
-set(c,'FontSize',12);
+% BUILD HOMOGENEOUS DEVICE
+DEV1.ER = ones(Nx,Ny);
+DEV1.UR = ones(Nx,Ny);
+if (MODE.EM == 'E')
+    DEV1.ER = ere * DEV1.ER;
+elseif (MODE.EM == 'H')
+    DEV1.ER = ere * DEV1.ER;
+end
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% BEGIN PWEM
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % COMPUTE BLOCH WAVE VECTORS
-BETA = bMin.*Betamax;
 
-DEV.LATTICE = a;
+% Reciprocal Lattice Vectors
+T1 = (2*pi/a) * [1 ; 0];
+T2 = (2*pi/a) * [0 ; 1];
+
+% Key points of symmetry
+G = [0 ; 0];
+X = 0.5.*T1;
+M = 0.5*T1 + 0.5.*T2;
+
+% Generate list of Bloch Wave Vectors
+L1      = norm(X-G);
+L2      = norm(M-X);
+L3      = norm(M-G);
+NP1     = NP;
+NP2     = round(NP1*L2/L1);
+NP3     = round(NP1*L3/L1);
+
+bx = [ linspace(G(1),X(1),NP1), linspace(X(1),M(1),NP2) , ...
+        linspace(M(1),G(1),NP3) ];
+by = [ linspace(G(2),X(2),NP1), linspace(X(2),M(2),NP2) , ...
+        linspace(M(2),G(2),NP3) ];
+BETA = [ bx ; by ];
+
+DEV.LATTICE     = a;
+DEV1.LATTICE    = a;
 
 % PERFORM SIMULATION
-for n = 1 : length(MODE.EM);
-    switch MODE.EM(n)
-        case 'E'
-            [WN,Ko] = pwem2d(DEV,BETA,PQ,MODE.EM(n));
-            
-            % EXTRACT REFRACTIVE INDEX
-            ne = norm(BETA)/real(sqrt(min(Ko)));
-        case 'H'
-            [WN,Ko] = pwem2d(DEV,BETA,PQ,MODE.EM(n));
-            
-            % EXTRACT REFRACTIVE INDEX
-            no = norm(BETA)/real(sqrt(min(Ko)));
-    end
-end
+[WNIH,KoIH] = pwem2d(DEV,BETA,PQ,MODE); % SUPER CELL
+[WNH,KoH]   = pwem2d(DEV1,BETA,PQ,MODE);% HOMOGENIZED CELL
 
-% EXTRACT PROPERTIES
-eo = no^2
-ee = ne^2
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% POST-PROCESS DATA
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+h = plot([1:length(bx)],WNH,'.r','LineWidth',1.5);
+hold on;
+h1 = plot([1:length(bx)],WNIH,'*b','LineWidth',1.5);
+set([h1],'MarkerSize',3);
+set(h,'MarkerSize',10);
+hold off;
+ylim([0 0.5]);
+xlim([1 length(bx)]);
+h2 = get(h(1),'Parent');
+set(h2,'FontSize',13,'LineWidth',1.5);
+title([MODE.EM '$\textrm{ Mode}$'],'FontSize',16,'Interpreter','LaTex')
 
-a = sqrt(eo/ee)
-e = sqrt(eo*ee)
+% Format x-Axis
+XT = [1 NP1 NP1+NP2 length(bx)];
+XL = {'\Gamma','X','M','\Gamma','Interpreter','LaTex'};
+set(h2,'XTick',XT,'XTickLabel',XL);
+xlabel('Bloch Wave Vector ($\vec{\beta}$)','Interpreter','LaTex','FontSize',14);
+
+% Format y-Axis
+ylabel('Normalized Frequency $\frac{\omega a}{2\pi c_0}$','Interpreter',...
+    'LaTex','FontSize',14,'Rotation',90);
+
+% Add Legend
+l = legend([h(1) h1(1)],'Homogeneous Unit Cell','Unit Cell','Location','Best');
+set(l(1),'Box','off');
